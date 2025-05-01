@@ -1,151 +1,158 @@
 import streamlit as st
 import pandas as pd
-import math
-from pathlib import Path
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
 
-# Set the title and favicon that appear in the Browser's tab bar.
+# Page configuration
 st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
+    page_title="Healthcare Data Analytics",
+    page_icon="🏥",
+    layout="wide"
 )
 
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
+# App title
+st.title("🏥 Healthcare Data Analytics Dashboard")
+st.markdown("Upload and analyze healthcare data")
 
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+# Sidebar
+st.sidebar.header("Data Input")
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
+# File upload - CSV only
+uploaded_file = st.sidebar.file_uploader("Upload your health dataset", type=["csv"])
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+# Create a demo dataset
+def get_demo_data():
+    # Sample healthcare costs data
+    data = pd.DataFrame({
+        'PatientID': range(1, 101),
+        'Age': np.random.randint(18, 85, 100),
+        'Gender': np.random.choice(['Male', 'Female'], 100),
+        'Department': np.random.choice(['Cardiology', 'Neurology', 'Oncology', 'Orthopedics'], 100),
+        'LengthOfStay': np.random.randint(1, 30, 100),
+        'TotalCost': np.random.uniform(500, 50000, 100),
+        'Readmission': np.random.choice([0, 1], 100, p=[0.85, 0.15])
+    })
+    return data
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+# Use demo data button
+use_demo = st.sidebar.button("Use Demo Data")
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
+# Load data
+df = None
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+    st.sidebar.success("Data loaded successfully!")
+elif use_demo:
+    df = get_demo_data()
+    st.sidebar.success("Demo data loaded!")
 
-    return gdp_df
+# Main content
+if df is not None:
+    # Data overview
+    st.header("Data Overview")
+    st.dataframe(df.head())
+    
+    # Basic statistics
+    st.header("Data Statistics")
+    st.dataframe(df.describe())
+    
+    # Simple visualizations using Matplotlib
+    st.header("Data Visualization")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Age Distribution")
+        fig, ax = plt.subplots()
+        ax.hist(df['Age'], bins=10, edgecolor='black')
+        ax.set_xlabel('Age')
+        ax.set_ylabel('Count')
+        st.pyplot(fig)
+    
+    with col2:
+        if 'Gender' in df.columns:
+            st.subheader("Gender Distribution")
+            gender_counts = df['Gender'].value_counts()
+            fig, ax = plt.subplots()
+            ax.pie(gender_counts, labels=gender_counts.index, autopct='%1.1f%%')
+            st.pyplot(fig)
+    
+    # Length of Stay Analysis (if available)
+    if 'LengthOfStay' in df.columns and 'Department' in df.columns:
+        st.header("Length of Stay by Department")
+        
+        dept_los = df.groupby('Department')['LengthOfStay'].mean().reset_index()
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.bar(dept_los['Department'], dept_los['LengthOfStay'])
+        ax.set_xlabel('Department')
+        ax.set_ylabel('Average Length of Stay (days)')
+        plt.xticks(rotation=45)
+        st.pyplot(fig)
+    
+    # Cost Analysis (if available)
+    if 'TotalCost' in df.columns:
+        st.header("Cost Analysis")
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.scatter(df['Age'], df['TotalCost'])
+        ax.set_xlabel('Age')
+        ax.set_ylabel('Total Cost ($)')
+        ax.set_title('Age vs. Total Cost')
+        st.pyplot(fig)
+    
+    # Simple predictive modeling
+    if 'LengthOfStay' in df.columns and 'Age' in df.columns:
+        st.header("Predictive Modeling")
+        
+        # Choose target variable
+        numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
+        target_variable = st.selectbox("Select target variable", 
+                                      [col for col in numeric_cols if col not in ['PatientID']])
+        
+        # Choose features
+        features = st.multiselect("Select features for prediction", 
+                                [col for col in numeric_cols if col != target_variable and col != 'PatientID'],
+                                default=[col for col in numeric_cols if col != target_variable and col != 'PatientID'][:2])
+        
+        if features and st.button("Train Model"):
+            # Prepare data
+            X = df[features]
+            y = df[target_variable]
+            
+            # Split data
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            
+            # Train model
+            model = LinearRegression()
+            model.fit(X_train, y_train)
+            
+            # Evaluate model
+            train_score = model.score(X_train, y_train)
+            test_score = model.score(X_test, y_test)
+            
+            # Display results
+            st.subheader("Model Performance")
+            st.write(f"Training R² Score: {train_score:.4f}")
+            st.write(f"Testing R² Score: {test_score:.4f}")
+            
+            # Display coefficients
+            st.subheader("Model Coefficients")
+            coef_df = pd.DataFrame({
+                'Feature': features,
+                'Coefficient': model.coef_
+            })
+            st.dataframe(coef_df)
+else:
+    st.info("Please upload a CSV file or use the demo data to get started.")
 
-gdp_df = get_gdp_data()
-
-# -----------------------------------------------------------------------------
-# Draw the actual page
-
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
-
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
-
-''
-
-cols = st.columns(4)
-
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
-
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
-
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+# Footer
+st.markdown("---")
+st.markdown("""
+**About this dashboard:** This healthcare analytics platform helps analyze patient data,
+monitor clinical outcomes, and build simple predictive models.
+""")
